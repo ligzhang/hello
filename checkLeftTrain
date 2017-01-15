@@ -1,0 +1,175 @@
+var log = function () {
+        console.log.apply(console,arguments)
+}
+
+
+var https = require('https');
+var mailer = require('nodemailer')
+var fs = require('fs')
+var ca = fs.readFileSync('./srca12306/srca.cer.pem')
+
+var schedule = require('node-schedule');
+/*
+可手动调整的地方
+*/
+var time = '2017-01-20'
+//合肥  'HFH'
+//扬州  'YLH'
+var from_station = 'YLH'
+//西安 
+var to_station = 'XAY'
+
+//发件人
+var from_mail = 'xxx @163.com'
+//密码
+var password ='****'
+//收件人
+var to_mail = 'xxx @qq.com'
+/*****************************************/
+
+var options = { 
+    hostname: 'kyfw.12306.cn',
+    path: '/otn/leftTicket/queryA?leftTicketDTO.train_date=' + `${time}` +
+            '&leftTicketDTO.from_station=' + `${from_station}` + 
+            '&leftTicketDTO.to_station='+ `${to_station}` +
+              '&purpose_codes=ADULT',
+    ca: [ca]
+};
+
+
+var results = []
+var checkLeftTrain = function () {
+var req = https.get(options, function(res){ 
+    var data = ' '
+    //log('成功了',res.statusCode)
+    //log('headers',res.headers)
+    
+    // 开启一个 SMTP 连接池
+    var transport = mailer.createTransport({
+        host:'smtp.163.com',
+        secureConnection:true,
+        port:465,
+        auth:{
+            user:`${from_mail}`,
+            pass:`${password}`,
+        }
+        })
+    
+    res.on('data',function (d) {
+        if(Buffer.isBuffer(d)){
+            dd = d.toString('utf8')
+            data += dd
+        }   else {
+            data += d 
+        }
+        //log('dd',dd)
+     
+    })
+       
+    res.on('end',function () {
+        var info = JSON.parse(data)
+        var object = info['data']
+        
+        //log('JJJJ',object)
+        for(var i = 0; i <object.length;i++){
+            var target = object[i]
+            var checkout = target['queryLeftNewDTO']
+            //log('车次： ',checkout['station_train_code'])
+            //log('起始：',checkout['start_station_name'])
+            //log('终点：',checkout['end_station_name'])
+            //log('商务座：',checkout['swz_num'])
+            //log('特等座',checkout['tz_num'])
+            //log('一等座',checkout['zy_num'])
+            //log('二等座',checkout['ze_num'])
+            //log('硬卧',checkout['yw_num'])
+            //log('硬座',checkout['yz_num'])
+            //log('无座',checkout['wz_num'])
+            //log(checkout['station_train_code'].length)
+            //log('************************')
+            
+            //列车车次
+            var checkedTrain = checkout['station_train_code']
+            var start_station = checkout['start_station_name']
+            var end_station = checkout['end_station_name']
+            //log(checkedTrain == 'K62')
+            var now = new Date()
+            //硬卧数量
+            var yw = checkout['yw_num']
+            var result = {
+                '车次': `${checkedTrain}`,
+                '起始站': `${start_station}`,
+                '终点站': `${end_station}`,
+                '硬卧': `${yw}`,
+                '查询时间':`${now.getMonth()+1}`+'月'+`${now.getDate()}` + '日' + `${now.getHours()}`+':'+`${now.getMinutes()}`,
+            }
+            results.push(result)
+         
+            
+            //想要乘坐的车次
+            if(checkedTrain == 'K62' || checkedTrain =='K2906') {
+                    
+                    //列车型号
+                    var num = checkedTrain
+                    //log('硬卧',yw)
+                    if(yw!='无'&&yw!='--'){
+                        
+                        //设置邮件内容
+                        var mailOptions = {
+                            from:'xxx',
+                            to:`${to_mail}`,
+                            subject:`${num}` + '有卧铺票啦',
+                            html:'赶紧抢票啦！\n'+'开车时间:'+ checkout['start_time']
+                        }
+                        
+                        //发送邮件
+                        transport.sendMail(mailOptions,function (err,res) {
+                        if(err) {
+                            log(err)
+                        } else {
+                            log('Message sent: ' + res.message)
+                        }
+                        transport.close()
+                        })
+                    
+                    }
+            } 
+            
+         
+            
+        }
+        const s = JSON.stringify(results, null, 2)
+        writeToFile('savedData.txt',s)
+    })
+    
+
+   
+});
+    req.on('error', function(err){
+    console.error(err.code);
+    });
+}
+    //将结果写入TXT文档
+    var writeToFile = function(path, data) {
+   
+        fs.writeFile(path, data, function(error){
+            if (error !== null) {
+                log('--- 写入失败', path)
+            } else {
+                log('*** 写入成功', path)
+            }
+        })
+    }
+
+   var scheduleRecurrenceRule = function () {
+            var rule = new schedule.RecurrenceRule()
+            rule.second = 0
+            
+            schedule.scheduleJob(rule,function () {
+                    checkLeftTrain()
+                    log('shceduleRecurrenceRule:' + new Date())
+                    
+            })
+   } 
+    
+ scheduleRecurrenceRule()
+  
